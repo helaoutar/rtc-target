@@ -1,95 +1,58 @@
-import Image from 'next/image'
-import styles from './page.module.css'
+"use client";
+
+import { useEffect, useRef } from "react";
+import { io } from "socket.io-client";
+
+const config: RTCConfiguration = {
+  iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
+  iceTransportPolicy: "all",
+};
+
+const socket = io("ws://signaling-862b446e30a8.herokuapp.com");
 
 export default function Home() {
-  return (
-    <main className={styles.main}>
-      <div className={styles.description}>
-        <p>
-          Get started by editing&nbsp;
-          <code className={styles.code}>src/app/page.tsx</code>
-        </p>
-        <div>
-          <a
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className={styles.vercelLogo}
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const pcRef = useRef<RTCPeerConnection>();
 
-      <div className={styles.center}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
+  useEffect(() => {
+    const go = async () => {
+      pcRef.current = new RTCPeerConnection(config);
+      pcRef.current.onicecandidate = (e) => onIceCandidate(e);
+      pcRef.current.onconnectionstatechange = (e) =>
+        console.log("connection change", e);
+      pcRef.current.ontrack = gotRemoteStream;
+      pcRef.current.onnegotiationneeded = (e) => console.log("nego needed", e);
 
-      <div className={styles.grid}>
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Docs <span>-&gt;</span>
-          </h2>
-          <p>Find in-depth information about Next.js features and API.</p>
-        </a>
+      console.log(pcRef.current);
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Learn <span>-&gt;</span>
-          </h2>
-          <p>Learn about Next.js in an interactive course with&nbsp;quizzes!</p>
-        </a>
+      socket.on("offer", async (args: RTCSessionDescriptionInit) => {
+        console.log("offer", args);
+        await pcRef.current!.setRemoteDescription(args);
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Templates <span>-&gt;</span>
-          </h2>
-          <p>Explore the Next.js 13 playground.</p>
-        </a>
+        const desc = await pcRef.current!.createAnswer();
+        await pcRef.current!.setLocalDescription(desc);
+        socket.emit("signal-answer", desc);
+      });
 
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Deploy <span>-&gt;</span>
-          </h2>
-          <p>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
-  )
+      socket.on("ice-candidate1", (args: RTCIceCandidate) => {
+        console.log("received candidate from 1", args);
+        pcRef.current!.addIceCandidate(args);
+      });
+    };
+
+    go();
+  }, []);
+
+  const gotRemoteStream = (e: RTCTrackEvent) => {
+    console.log("gotRemoteStream", e);
+    if (videoRef.current!.srcObject !== e.streams[0]) {
+      videoRef.current!.srcObject = e.streams[0];
+    }
+  };
+
+  const onIceCandidate = (event: RTCPeerConnectionIceEvent) => {
+    socket.emit("send-ice-candidate2", event.candidate);
+  };
+
+  return <video ref={videoRef} playsInline autoPlay muted></video>;
 }
